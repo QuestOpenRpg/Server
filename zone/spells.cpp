@@ -201,6 +201,7 @@ bool Mob::CastSpell(uint16 spell_id, uint16 target_id, CastingSlot slot,
 	int32 cast_time, int32 mana_cost, uint32* oSpellWillFinish, uint32 item_slot,
 	uint32 timer, uint32 timer_duration, uint32 type, int16 *resist_adjust)
 {
+	if(PlayerBotRetreating(this)) return false;
 	LogSpellsDetail("CastSpell called for spell [{}] ([{}]) on entity [{}], slot [{}], time [{}], mana [{}] adj [{}], from item slot [{}]",
 		spells[spell_id].name, spell_id, target_id, static_cast<int>(slot), cast_time, mana_cost, resist_adjust? *resist_adjust : spells[spell_id].ResistDiff, (item_slot==0xFFFFFFFF)?999:item_slot);
 

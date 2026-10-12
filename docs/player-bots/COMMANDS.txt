@@ -182,7 +182,8 @@ ABILITIES
 
 EQUIPMENT AND REAGENTS
 #bot inventory <Name>
-  List saved equipment slots, item IDs and charges.
+  List saved equipment slots, item names, item IDs and charges.
+  Missing item definitions display Unknown item with the saved ID.
 #bot equip <Name> <PlayerSlot> <BotSlot>
   Move an item from your general inventory slot 22-29 to bot equipment slot 1-21.
 #bot unequip <Name> <EmptyPlayerSlot> <BotSlot>
@@ -778,3 +779,33 @@ DIRECT-DAMAGE CASTING TOGGLE
 Saved per bot. DoTs (including ones with an initial hit), buffs and heals stay
 allowed. Instant lifetaps and damaging stuns are blocked while OFF. Existing
 spell restrictions still apply. New bots default to ON.
+
+RETREAT (added 2026-10-06)
+#bot retreat Lilly on        Disengage Lilly and make her follow you
+#bot retreat Lilly off       Release Lilly from retreat
+#bot retreat all on          Retreat with all your currently spawned bots
+#bot retreat all off         Release all your currently spawned bots
+#bot report Lilly            Show whether retreat is enabled
+Retreat interrupts current casting and stops attacks, taunt, offensive skills,
+healing, buffs and other new casts. The bot and its pet follow instead of fighting,
+even if you attack or target a different enemy. Assist and conflicting movement,
+sit and ability commands cannot override retreat: turn it off explicitly first.
+Turning retreat on releases forced sitting. Turning it off restores normal
+behavior with the previous assist/passive setting; the bot keeps following unless
+its saved suspend setting requires it to stay.
+Saved per bot across zoning, dismissal, login and server restart; defaults to OFF.
+The command applies only to your spawned bots. No database migration is required.
+Retreat does not erase enemy hate, remove existing buffs/DoTs/damage shields,
+grant immunity, or bypass roots, stuns, mesmerize, fear or normal pathfinding.
+It does not evacuate or teleport the party.
+
+BOT UPDATES (2026-10-12)
+#bot revive Name             Revive a dead bot, then use #bot spawn Name
+Revival has no timer. Owner must be alive and owner/bots/pets out of combat.
+Revived bots return at full health and mana; normal spawn limits still apply.
+#bot tankclose Name|all on|off   Move closer while respecting model clearance
+#bot backattack Name|all on|off  Arrange attackers behind their enemy
+#bot assist target PlayerOrBotName on|off
+Select your bot first: assist target affects only that bot and overrides normal
+assist until disabled. The source must share your group/raid or be the owner.
+Retreat retains priority. See the detailed command documents for restrictions.

@@ -5,6 +5,10 @@ creation, equipment, casting controls, formations, keep-pace, and database migra
 
 - [Build and installation](docs/player-bots/README.md)
 - [Commands](docs/player-bots/COMMANDS.txt)
+- [Tank positioning](docs/bot-tankclose.md)
+- [Rear attack formations](docs/bot-backattack.md)
+- [Assist another player or bot](docs/bot-assist-target.md)
+- [Challenge Mode and required migration](docs/challenge-mode/GUIDE.txt)
 - [Race/class numbers](docs/player-bots/RACE-CLASS-NUMBERS.txt)
 - [Validation and review notes](docs/player-bots/VALIDATION.md)
 

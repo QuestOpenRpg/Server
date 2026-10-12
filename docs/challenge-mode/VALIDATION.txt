@@ -1,0 +1,31 @@
+Challenge Mode deployment - October 8, 2026
+
+Full zone target build passed (70/70).
+Command/persistence/XP fixture passed, including unrestricted override,
+all saved bind slots, database failures and level-1 XP loss.
+Raid fixture passed: overflow groups, leader requirements, full-raid
+rejection, existing bot group preservation and level boundaries.
+Bot-cap fixture passed: level loss, override-off, safe dismissal and
+protection of another owner's bots.
+Real database transaction tested enabled=1 then enabled=0 and rolled back.
+
+Installed stripped zone SHA256:
+74c628e19476e2b2f4614f7a126d6fda536a0720bf57b1f01bc2700ae60c23b7
+Previous zone SHA256:
+741f9be43ce4f9a5be2f3e0c8e818a7eb8c65a3264c35858dda23fb6d8aeb400
+
+Installer verified zero active accounts before shutdown. Empty unresponsive
+zone processes required termination after the graceful shutdown wait.
+Two restarted zone executable hashes matched the installed binary.
+Post-install: challenge command access=0; enrollment table has zero rows;
+no active accounts. Existing player records and global death rules unchanged.
+
+Compact rollback-snapshot contains previous stripped zone and changed source
+files. No new full-server/database backup was created. The new additive
+takp_character_challenge table is retained on binary rollback.
+
+Local Git source synchronized while preserving its pre-existing diagnostic
+compile guards. Existing unrelated uncommitted changes retained. No push.
+
+Not verified through a game client: book clicks, corpse gear/cash recovery,
+client-visible XP loss, raid gameplay. Automated tests do not replace these.

@@ -20,9 +20,14 @@ std::vector<Mob*> PlayerBot::Friends()
 bool PlayerBot::JoinRaid(Client *owner)
 {
  auto *raid=owner->GetRaid();if(!raid||bot_id_>2147483647)return false;
- const auto group=raid->GetGroup(owner);if(group>=MAX_RAID_GROUPS)return false;
+ auto group=raid->GetGroup(owner);if(group>=MAX_RAID_GROUPS)return false;
  if(!raid->IsLeader(owner)&&!raid->IsGroupLeader(owner->GetName()))return false;
  const bool present=raid->IsRaidMember(GetName());
+ if(present)group=raid->GetGroup(GetName());
+ if(group>=MAX_RAID_GROUPS)return false;
+ if(raid->GroupCount(group)-(present?1:0)>=MAX_GROUP_MEMBERS && owner->IsChallengeMode() && owner->GetLevel()>=45 && raid->IsLeader(owner)) {
+  for(unsigned g=0;g<MAX_RAID_GROUPS;++g)if(raid->GroupCount(g)<MAX_GROUP_MEMBERS){group=g;break;}
+ }
  if(raid->GroupCount(group)-(present?1:0)>=MAX_GROUP_MEMBERS||(!present&&raid->RaidCount()>=MAX_RAID_MEMBERS))return false;
  // Negative IDs are reserved for bots; player character IDs are positive.
  auto inserted=database.QueryDatabase(fmt::format("INSERT INTO raid_members(raidid,charid,groupid,_class,level,name) VALUES({},{},{},{},{},'{}') ON DUPLICATE KEY UPDATE raidid=VALUES(raidid),groupid=VALUES(groupid),level=VALUES(level),name=VALUES(name)",raid->GetID(),-static_cast<int>(bot_id_),group,GetClass(),GetLevel(),GetName()));
@@ -69,7 +74,7 @@ bool PlayerBot::Components(uint16 id,bool consume)
 
 bool PlayerBot::CastSpell(uint16 id,uint16 target_id,EQ::spells::CastingSlot slot,int32 casttime,int32 mana_cost,uint32 *finish,uint32 item_slot,uint32 timer,uint32 duration,uint32 type,int16 *resist)
 {
- if(forced_sit_||!IsValidSpell(id)||IsCasting()||!SpellPermitted(id,entity_list.GetMob(target_id))) return false;
+ if(Retreating()||forced_sit_||!IsValidSpell(id)||IsCasting()||!SpellPermitted(id,entity_list.GetMob(target_id))) return false;
  pending_click_slot_=-1;pending_click_spell_=0;
  if(item_slot>=EQ::invslot::EQUIPMENT_BEGIN&&item_slot<=EQ::invslot::EQUIPMENT_END) {pending_click_slot_=item_slot;pending_click_spell_=id;}
  else if(!Components(id,false))return false;

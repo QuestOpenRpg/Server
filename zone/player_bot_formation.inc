@@ -50,14 +50,14 @@ bool FormationDestination(PlayerBot* bot, Client* owner, BotFormation::Point off
 bool PlayerBot::FormationFollow(Client* owner) {
     auto& state = FormationFor(owner);
     if (!state.enabled) return false;
-    if (!BotFormation::CanPosition(GetFollowID() == owner->GetID(), IsEngaged(), IsCasting(), options_["suspend"] != 0, IsRooted()))
+    if (!BotFormation::CanPosition(GetFollowID() == owner->GetID(), IsEngaged(), IsCasting(), (options_["suspend"] != 0 && !Retreating()), IsRooted()))
         return true; // Never let fallback movement override a casting/suspended bot.
     const auto now = Timer::GetCurrentTime();
     if (now >= state.next_check) {
         state.next_check = now + 200;
         auto bots = Owned(owner);
         std::vector<uint32_t> present;
-        for (auto* b : bots) if (b->GetFollowID() == owner->GetID() && !b->options_["suspend"]) present.push_back(b->ID());
+        for (auto* b : bots) if (b->GetFollowID() == owner->GetID() && (!b->options_["suspend"] || b->Retreating())) present.push_back(b->ID());
         auto previous_slots = state.slots;
         BotFormation::Reconcile(state.slots, present);
         if (previous_slots != state.slots) state.clearance = BotFormation::Clearance{};
@@ -156,7 +156,7 @@ bool PlayerBot::AtFormationRest() {
  return it!=state.destinations.end() && glm::length2(glm::vec2(GetX()-it->second.x,GetY()-it->second.y))<=1.f;
 }
 bool PlayerBot::NormalFollow(Client* owner) {
- if(!BotFormation::CanPosition(GetFollowID()==owner->GetID(),IsEngaged(),IsCasting(),options_["suspend"]!=0,IsRooted())) {follow_moving_=false;return true;}
+ if(!BotFormation::CanPosition(GetFollowID()==owner->GetID(),IsEngaged(),IsCasting(),(options_["suspend"]!=0 && !Retreating()),IsRooted())) {follow_moving_=false;return true;}
  const bool moving=follow_motion_.Moving(Timer::GetCurrentTime());
  if(moving) arrival_facing_pending_=false;
  const float gap=glm::distance(glm::vec2(GetPosition()),glm::vec2(follow_motion_.X(Timer::GetCurrentTime()),follow_motion_.Y(Timer::GetCurrentTime())));
@@ -182,7 +182,7 @@ bool PlayerBot::NormalFollow(Client* owner) {
 
 int PlayerBot::FollowPace(int maximum) {
  auto* owner=Owner();
- if(!owner || GetFollowID()!=owner->GetID() || IsEngaged() || IsCasting() || IsFeared() || options_["suspend"] || (!follow_moving_&&!formation_moving_)) return maximum;
+ if(!owner || GetFollowID()!=owner->GetID() || IsEngaged() || IsCasting() || IsFeared() || (options_["suspend"] && !Retreating()) || (!follow_moving_&&!formation_moving_)) return maximum;
  const auto now=Timer::GetCurrentTime();
  const bool moving=follow_motion_.Moving(now);
  float error=0;

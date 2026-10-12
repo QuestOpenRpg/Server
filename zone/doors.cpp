@@ -1,3 +1,4 @@
+#include "challenge_mode.h"
 /*	EQEMu: Everquest Server Emulator
 	Copyright (C) 2001-2002 EQEMu Development Team (http://eqemu.org)
 
@@ -188,6 +189,10 @@ bool Doors::Process()
 
 void Doors::HandleClick(Client* sender, uint8 trigger, bool floor_port)
 {
+	if (sender && ChallengeMode::BlockBook(sender->IsChallengeMode(), sender->GetLevel(), Strings::EqualFold(destination_zone_name, "poknowledge"))) {
+		sender->Message(Chat::Yellow, "Challenge Mode: Plane of Knowledge books become available at level 45.");
+		return;
+	}
 	//door debugging info dump
 	LogDoors("[{}] clicked door [{}] (dbid [{}], eqid [{}]) at [{}]", sender->GetName(), this->door_name, this->database_id, this->door_id, to_string(m_position).c_str());
 	LogDoorsDetail("  incline [{}], opentype [{}], lockpick [{}], keys [{}] [{}], nokeyring [{}], trigger [{}] type [{}], param [{}]", this->incline, this->open_type, this->lockpick, this->key_item_id, this->alt_key_item_id, this->no_key_ring, this->trigger_door, this->trigger_type, this->door_param);

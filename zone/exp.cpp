@@ -1,3 +1,4 @@
+#include "player_bot.h"
 /*	EQEMu: Everquest Server Emulator
 	Copyright (C) 2001-2003 EQEMu Development Team (http://eqemulator.net)
 
@@ -634,11 +635,11 @@ void Client::SetEXP(uint32 set_exp, uint32 set_aaxp, bool isrezzexp, bool is_spl
 				Message(Chat::Yellow, "Welcome to level %i!", check_level);
 			}
 
-			if (check_level == RuleI(Character, DeathItemLossLevel)) {
+			if (!IsChallengeMode() && check_level == RuleI(Character, DeathItemLossLevel)) {
 				Message_StringID(Chat::Yellow, StringID::CORPSE_ITEM_LOST);
 			}
 
-			if (check_level == RuleI(Character, DeathExpLossLevel)) {
+			if (!IsChallengeMode() && check_level == RuleI(Character, DeathExpLossLevel)) {
 				Message_StringID(Chat::Yellow, StringID::CORPSE_EXP_LOST);
 			}
 
@@ -695,6 +696,7 @@ void Client::SetLevel(uint8 set_level, bool command)
 	LevelUpdate_Struct* lu = (LevelUpdate_Struct*)outapp->pBuffer;
 
 	level = set_level;
+	EnforceChallengeBotLimit(this);
 
 	if(IsRaidGrouped()) {
 		Raid *r = this->GetRaid();
@@ -1275,12 +1277,13 @@ bool Client::IsInLevelRange(uint8 maxlevel)
 
 void Client::GetExpLoss(Mob* killerMob, uint16 spell, int &exploss, uint8 killedby)
 {
-	if (GetLevel() < 2)
+	if (GetLevel() < 2 && !IsChallengeMode())
 	{
 		exploss = 0;
 		return;
 	}
-	int last_level_xp = GetEXPForLevel(GetLevel()) - GetEXPForLevel(GetLevel() - 1);
+	// Level 1 has no preceding level; use its level 1-to-2 XP span.
+	int last_level_xp = GetLevel() == 1 ? GetEXPForLevel(2) - GetEXPForLevel(1) : GetEXPForLevel(GetLevel()) - GetEXPForLevel(GetLevel() - 1);
 	if (GetLevel() >= 25)
 		exploss = last_level_xp / 4;
 	else
@@ -1297,7 +1300,7 @@ void Client::GetExpLoss(Mob* killerMob, uint16 spell, int &exploss, uint8 killed
 	exploss = static_cast<int>(static_cast<float>(exploss) * RuleR(Character, EXPLossMultiplier));
 
 	// Death exp loss started at level 6 until March 19 2002, then it was 11
-	if( (level < RuleI(Character, DeathExpLossLevel)) || (level > RuleI(Character, DeathExpLossMaxLevel)) || IsBecomeNPC() )
+	if( (!IsChallengeMode() && level < RuleI(Character, DeathExpLossLevel)) || (level > RuleI(Character, DeathExpLossMaxLevel)) || IsBecomeNPC() )
 	{
 		exploss = 0;
 	}

@@ -1054,6 +1054,11 @@ void Client::Handle_Connect_OP_ZoneEntry(const EQApplicationPacket *app)
 	database.LoadCharacterBindPoint(cid, &m_pp); /* Load Character Bind */
 	database.LoadCharacterCurrency(cid, &m_pp); /* Load Character Currency into PP */
 	database.LoadCharacterData(cid, &m_pp, &m_epp); /* Load Character Data from DB into PP as well as E_PP */
+	if (!LoadChallengeMode()) {
+		LogError("Unable to load Challenge Mode for character [{}]; refusing incomplete login", cid);
+		Kick();
+		return;
+	}
 	database.LoadCharacterSkills(cid, &m_pp); /* Load Character Skills */
 	database.LoadCharacterSpellBook(cid, &m_pp); /* Load Character Spell Book */
 	database.LoadCharacterMemmedSpells(cid, &m_pp);  /* Load Character Memorized Spells */

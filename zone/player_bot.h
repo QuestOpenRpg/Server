@@ -3,6 +3,8 @@ class Client;
 class Mob;
 class Seperator;
 bool IsPlayerBot(Mob *mob);
+bool PlayerBotRetreating(Mob *mob);
+void FollowPlayerBotRetreat(Mob *mob);
 int PlayerBotDoTDamage(Mob *mob,unsigned short spell_id,int value);
 bool PlayerBotSpellTargetAllowed(Mob *mob,Mob *target,unsigned short spell_id);
 bool PlayerBotDirectDamageAllowed(Mob *mob,unsigned short spell_id);
@@ -30,3 +32,9 @@ int PlayerBotFollowPace(Mob* mob,int maximum);
 void NotePlayerBotMovementPacket(Mob* mob);
 struct SpawnPositionUpdate_Struct;
 void TracePlayerBotPacket(Mob* mob, SpawnPositionUpdate_Struct* packet, bool no_delta);
+
+void EnforceChallengeBotLimit(Client *owner);
+
+bool HandlePlayerBotTankClose(Mob *mob);
+
+bool HandlePlayerBotBackAttack(Mob *mob);

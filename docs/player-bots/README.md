@@ -82,3 +82,11 @@ Keep this feature on `player-bots`. Fetch upstream changes into a separate devel
 checkout, review conflicts, rebuild and run regression/gameplay checks before deploying.
 Do not automatically rebase or update a running server. Preserve upstream history and
 licenses. Fork publication does not imply upstream acceptance.
+
+## Updating an existing bot installation (October 2026)
+
+Before starting this version, apply the additive SQL in
+[Challenge Mode migration](../challenge-mode/migration.sql), even if no characters
+will enable the mode. Character login now loads this table. Retain all existing
+character and bot tables. Rebuild the zone target; the positioning, retreat and
+assist settings use the existing bot options table.

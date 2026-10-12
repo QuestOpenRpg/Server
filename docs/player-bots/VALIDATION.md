@@ -38,6 +38,19 @@ contain all changes on this branch.
 
 ## Gameplay checks before a binary release
 
+Retreat update (2026-10-06): the deployed-source zone target compiled, and all
+15 standalone regression programs passed. Retreat tests extract the actual
+production state-transition methods and AI branch and run them against world,
+database and navigation test doubles. They cover failed persistence, forced-sit
+release, cast cancellation, pets, repeated incoming hate, control effects and
+restoring normal behavior. They do not prove client-visible movement or real
+combat behavior; gameplay verification is still required.
+
+- Engage enemies, enable retreat for one bot and then all, attack a new target,
+  and verify they keep following without attacking or casting until released.
+- Verify pets withdraw, enemy hate remains, and retreat survives zoning/login.
+- Verify rooted/stunned/feared bots retain the normal control-effect restrictions.
+
 - Log out/in with equipped armor; verify appearance and item persistence.
 - Use taunt and compare aggro, then toggle it off and check the report.
 - Use `#bot dps cast off` and confirm DoTs/heals/buffs remain available.
@@ -50,3 +63,18 @@ contain all changes on this branch.
 Future upstream updates require an explicit merge/rebase, conflict review, build
 and regression checks. Do not automatically rebase or deploy a running server.
 Preserve upstream history and license notices.
+
+## October 12, 2026 update
+
+Includes retreat, appearance controls, immediate full-resource revival, tankclose,
+assist target, rear formations, and Challenge Mode integration. Updated bot source
+matches deployed source except the intentional opt-in diagnostic guards. These
+features previously passed zone builds; a new full release build has not been run.
+Backattack geometry tests are included alongside the existing bot regressions.
+In-game positioning, revival and raid behavior still require gameplay validation.
+Apply docs/challenge-mode/migration.sql before starting this version on another
+server; it adds a table without replacing character or bot data.
+
+Publication checks: all 16 standalone bot programs and all three Challenge Mode
+fixtures passed against the prepared source on October 12. The retreat test double
+was updated to include the newer positioning state fields.

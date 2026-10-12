@@ -1275,6 +1275,24 @@ void Mob::AI_Process() {
 	if (IsNPC() && !spawnpacket_sent)
 		return;
 
+ // Retreat bypasses target acquisition and combat AI, including pet AI.
+ // Only the retreating actor's hate list is cleared; enemy hate is untouched.
+ if(PlayerBotRetreating(this)) {
+  if(IsCasting()) InterruptSpell();
+  bardsong=0;
+  WipeHateList();SetTarget(nullptr);
+  if(engaged) {engaged=false;AI_Event_NoLongerEngaged();}
+  if(IsMezzed() || IsStunned() || IsRooted()) {StopNavigation();return;}
+  if(IsFeared()) {
+   if(RuleB(Combat, EnableFearPathing) && currently_fleeing) DoFearMovement();
+   else StopNavigation();
+   return;
+  }
+  if(GetAppearance()==eaSitting) SetAppearance(eaStanding);
+  FollowPlayerBotRetreat(this);
+  return;
+ }
+
 	bool ai_think = AIthink_timer->Check();
 
 	if (!(ai_think || attack_timer.Check(false)))
@@ -1480,6 +1498,8 @@ void Mob::AI_Process() {
 					is_combat_range = true;
 			}
 		}
+		if (HandlePlayerBotBackAttack(this)) return;
+		if (is_combat_range && HandlePlayerBotTankClose(this)) return;
 		if (is_combat_range)
 		{
 			if (IsMoving()) {

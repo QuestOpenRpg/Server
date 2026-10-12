@@ -1279,7 +1279,7 @@ bool Client::Death(Mob* killerMob, int32 damage, uint16 spell, EQ::skills::Skill
 	}
 
 	// We're in the middle of a trade and are not leaving a corpse.
-	if (trade && (GetGM() || !RuleB(Character, LeaveCorpses) || GetLevel() < RuleI(Character, DeathItemLossLevel)))
+	if (trade && ((GetGM() && !IsChallengeMode()) || !LeavesEquipmentCorpse()))
 	{
 		Mob *with = trade->With();
 		if (with && with->IsClient()) 
@@ -1422,13 +1422,13 @@ bool Client::Death(Mob* killerMob, int32 damage, uint16 spell, EQ::skills::Skill
 
 	// now we apply the exp loss, unmem their spells, and make a corpse
 	// unless they're a GM (or less than lvl 10
-	if(!GetGM())
+	if(!GetGM() || IsChallengeMode())
 	{
 		if(exploss > 0) {
 			int32 newexp = GetEXP();
 			if(exploss > newexp) {
 				//lost more than we have... wtf..
-				newexp = 1;
+				newexp = IsChallengeMode() ? 0 : 1;
 			} else {
 				newexp -= exploss;
 			}
@@ -1438,7 +1438,7 @@ bool Client::Death(Mob* killerMob, int32 damage, uint16 spell, EQ::skills::Skill
 		
 		UnmemSpellAll(false);
 
-		if((RuleB(Character, LeaveCorpses) && GetLevel() >= RuleI(Character, DeathItemLossLevel)) || RuleB(Character, LeaveNakedCorpses))
+		if(LeavesEquipmentCorpse() || RuleB(Character, LeaveNakedCorpses))
 		{
 			// If we've died on a boat, make sure corpse falls overboard.
 			if(GetBoatNPCID() != 0)

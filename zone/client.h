@@ -538,6 +538,12 @@ public:
 	inline const char* AccountName()const { return account_name; }
 	inline int16 Admin() const { return admin; }
 	inline uint32 CharacterID() const { return character_id; }
+	bool IsChallengeMode() const { return challenge_mode_enabled_; }
+	bool LoadChallengeMode();
+	bool SetChallengeMode(bool enabled);
+	unsigned ChallengeBotLimit();
+	bool LeavesEquipmentCorpse() const;
+
 	void UpdateAdmin(bool iFromDB = true);
 	void UpdateGroupID(uint32 group_id);
 	void UpdateWho(uint8 remove = 0);
@@ -1063,6 +1069,7 @@ protected:
 	QGlobalCache *qGlobals;
 
 private:
+	bool challenge_mode_enabled_ = false;
 	eqFilterMode ClientFilters[_FilterCount];
 	int32 HandlePacket(const EQApplicationPacket *app);
 	void OPTGB(const EQApplicationPacket *app);

@@ -36,6 +36,7 @@
 extern QueryServ* QServ;
 void command_companion(Client *c, const Seperator *sep);
 void command_bot(Client *c, const Seperator *sep);
+void command_challenge(Client *c, const Seperator *sep);
 extern WorldServer worldserver;
 extern FastMath g_Math;
 void CatchSignal(int sig_num);
@@ -86,6 +87,7 @@ int command_init(void)
 	}
 
 	if (
+		command_add("challenge", "mode on|status - Permanent character challenge rules.", AccountStatus::Player, command_challenge) ||
 		command_add("bot", "[help] - Create and command your persistent bots.", AccountStatus::Player, command_bot) ||
 		command_add("companion", "[spawn|follow|stay|group|ungroup|dismiss] - Experimental noncombat companion (development only).", AccountStatus::GMImpossible, command_companion) ||
 		command_add("advnpcspawn", "[maketype|makegroup|addgroupentry|addgroupspawn][removegroupspawn|movespawn|editgroupbox|cleargroupbox].", AccountStatus::GMImpossible, command_advnpcspawn) ||
@@ -499,7 +501,7 @@ int command_realdispatch(Client* c, std::string message, bool ignore_status)
 		const std::string& sub_command = sep.arg[1];
 
 		for (const auto& e : command_subsettings) {
-			if (e.sub_command == sub_command && (cur->function != command_bot || e.parent_command == "bot")) {
+			if (e.sub_command == sub_command && ((cur->function != command_bot && cur->function != command_challenge) || e.parent_command == cstr)) {
 				can_use_subcommand = c->Admin() >= static_cast<int16>(e.access_level);
 				is_subcommand = true;
 				found_subcommand_setting = true;
@@ -509,7 +511,7 @@ int command_realdispatch(Client* c, std::string message, bool ignore_status)
 
 		if (!found_subcommand_setting) {
 			for (const auto& e : command_subsettings) {
-				if (e.sub_command == sub_command && (cur->function != command_bot || e.parent_command == "bot")) {
+				if (e.sub_command == sub_command && ((cur->function != command_bot && cur->function != command_challenge) || e.parent_command == cstr)) {
 					can_use_subcommand = c->Admin() >= static_cast<int16>(e.access_level);
 					is_subcommand = true;
 					break;

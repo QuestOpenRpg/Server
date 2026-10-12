@@ -9,6 +9,7 @@
 #include "string_ids.h"
 #include "../common/skill_caps.h"
 #include "player_bot.h"
+#include "player_bot_backattack.h"
 #include "player_bot_rest.h"
 #include "player_bot_follow.h"
 #include "player_bot_formation.h"
@@ -29,6 +30,18 @@ class PlayerBot final : public NPC {
 public:
  using NPC::SetAppearance;
  bool forced_sit_=false, resume_follow_=false;
+ bool Retreating() const {auto it=options_.find("retreat");return it!=options_.end() && it->second!=0;}
+ void BeginRetreat() {
+  ForceSit(false);
+  InterruptSpell();bardsong=0;
+  WipeHateList();SetTarget(nullptr);
+  ResetFormationMotion();StopNavigation();Follow();
+  SetAppearance(eaStanding);
+  rest_gate_.Reset(Timer::GetCurrentTime());rest_started_=0;
+  if(auto* pet=GetPet()) {
+   pet->InterruptSpell();pet->WipeHateList();pet->SetTarget(nullptr);pet->StopNavigation();
+  }
+ }
  void AI_Process() override { if(!forced_sit_) NPC::AI_Process(); }
  void ForceSit(bool enabled) {
   if(enabled==forced_sit_) return;
@@ -195,10 +208,10 @@ public:
 			if (!stance_ || (pet->GetTarget() && !Allowed(pet->GetTarget()))) { pet->WipeHateList(); pet->SetTarget(nullptr); }
 		}
 		if(!IsEngaged()&&!owner->GetAggroCount()&&GetFollowID()&&DistanceSquared(GetPosition(),owner->GetPosition())>250000)GMMove(owner->GetX(),owner->GetY(),owner->GetZ(),owner->GetHeading());
-		if (assist_timer_.Check() && stance_ && !IsEngaged() && owner->AutoAttackEnabled() && Allowed(owner->GetTarget())) Engage(owner->GetTarget());
+		if (assist_timer_.Check()) UpdateAssist();
   follow_motion_.Update(Timer::GetCurrentTime(),owner->GetX(),owner->GetY(),owner->GetDeltaX(),owner->GetDeltaY());
   CheckFollowStop(owner);
-  const bool can_rest=!IsEngaged()&&!owner->GetAggroCount()&&!IsCasting()&&PlayerBotRestLocation(GetFollowID()!=0,DistanceSquaredNoZ(GetPosition(),owner->GetPosition()),GetFollowDistance(),AtFormationRest())&&(GetMana()<GetMaxMana()||GetHP()<GetMaxHP());
+  const bool can_rest=!Retreating()&&!IsEngaged()&&!owner->GetAggroCount()&&!IsCasting()&&PlayerBotRestLocation(GetFollowID()!=0,DistanceSquaredNoZ(GetPosition(),owner->GetPosition()),GetFollowDistance(),AtFormationRest())&&(GetMana()<GetMaxMana()||GetHP()<GetMaxHP());
   const bool owner_moving=follow_motion_.Moving(Timer::GetCurrentTime());
   const bool resting=forced_sit_ || rest_gate_.Update(Timer::GetCurrentTime(),
       {owner->GetX(),owner->GetY(),owner->GetZ()}, {GetX(),GetY(),GetZ()},
@@ -231,6 +244,13 @@ public:
 	{
 		return stance_ && Allowed(target) && NPC::Attack(target, hand, damage);
 	}
+ bool BackAttackEnabled() const {auto it=options_.find("backattack");return it!=options_.end() && it->second!=0;}
+ bool BackAttackPosition();
+ bool backattack_moving_=false;
+ uint64 backattack_next_=0;
+ bool CloseTankPosition();
+ bool tank_close_moving_=false;
+ uint64 tank_close_next_=0;
  Timer bot_taunt_timer_{6000};
  unsigned bot_taunt_attempts_=0;
  void DoClassAttacks(Mob *target) override {
@@ -266,9 +286,65 @@ public:
  Mob *GetOwnerOrSelf() override { auto *c = Owner(); return c ? static_cast<Mob*>(c) : this; }
  bool HasOwner() override { return Owner() != nullptr; }
  bool IsPet() override { return false; }
+
+ int AssistSourceID() const {auto it=options_.find("assist_source");return it==options_.end()?0:it->second;}
+ Mob *ResolveAssistSource(int id) {
+  if(id>0) return entity_list.GetClientByCharID(id);
+  if(id<0) for(const auto &entry:entity_list.GetNPCList()) {
+   auto *bot=dynamic_cast<PlayerBot*>(entry.second);
+   if(bot && !bot->GetDepop() && static_cast<int64>(bot->ID())==-static_cast<int64>(id)) return bot;
+  }
+  return nullptr;
+ }
+ bool ValidAssistSource(Mob *source) {
+  if(!source || source==this || source->HasDied() || !(source->IsClient() || IsPlayerBot(source))) return false;
+  if(source->IsClient() && !source->CastToClient()->Connected()) return false;
+  return source==Owner() || (GetGroup() && GetGroup()==source->GetGroup()) ||
+         (GetRaid() && GetRaid()==source->GetRaid());
+ }
+ bool AssistCycle(Mob *source) {
+  std::set<Mob*> visited{this};
+  while(auto *bot=dynamic_cast<PlayerBot*>(source)) {
+   if(!visited.insert(bot).second)return true;
+   source=bot->ResolveAssistSource(bot->AssistSourceID());
+  }
+  return false;
+ }
+ Mob *AssistSource() {
+  auto *source=ResolveAssistSource(AssistSourceID());
+  return ValidAssistSource(source) && !AssistCycle(source)?source:nullptr;
+ }
+ Mob *AssistEnemy() {auto *source=AssistSource();return source?source->GetTarget():nullptr;}
+ void ClearAssistCombat() {
+  if(IsCasting() && IsValidSpell(casting_spell_id) && !IsBeneficialSpell(casting_spell_id)) InterruptSpell();
+  WipeHateList();SetTarget(nullptr);StopNavigation();
+  if(auto *pet=GetPet()) {pet->WipeHateList();pet->SetTarget(nullptr);pet->StopNavigation();if(pet->IsCasting())pet->InterruptSpell();}
+ }
+ bool SetAssistSource(Mob *source) {
+  int id=0;
+  if(source) {
+   if(!ValidAssistSource(source) || AssistCycle(source))return false;
+   if(auto *bot=dynamic_cast<PlayerBot*>(source)) {if(bot->ID()>2147483647u)return false;id=-static_cast<int>(bot->ID());}
+   else {if(source->CastToClient()->CharacterID()>2147483647u)return false;id=source->CastToClient()->CharacterID();}
+  }
+  if(!database.QueryDatabase(fmt::format("INSERT INTO takp_bot_options(bot_id,setting,value) VALUES({},'assist_source',{}) ON DUPLICATE KEY UPDATE value=VALUES(value)",bot_id_,id)).Success())return false;
+  options_["assist_source"]=id;ClearAssistCombat();return true;
+ }
+ void UpdateAssist() {
+  if(!AssistSourceID()) {
+   auto *owner=Owner();
+   if(owner && stance_ && !IsEngaged() && owner->AutoAttackEnabled() && Allowed(owner->GetTarget()))Engage(owner->GetTarget());
+   return;
+  }
+  auto *enemy=AssistEnemy();
+  if(!stance_ || !Allowed(enemy)) {if(GetTarget() || IsEngaged() || (GetPet() && GetPet()->GetTarget()))ClearAssistCombat();return;}
+  if(GetTarget()!=enemy || !IsEngaged()) {ClearAssistCombat();Engage(enemy);}
+ }
+
  bool Allowed(Mob *target) {
+  if(AssistSourceID() && target!=AssistEnemy())return false;
   auto *c = Owner();
-  return c && !forced_sit_ && !options_["suspend"] && target && target != this && target->IsNPC() && !IsPlayerBot(target) && !target->IsPlayerOwned() &&
+  return c && !Retreating() && !forced_sit_ && !options_["suspend"] && target && target != this && target->IsNPC() && !IsPlayerBot(target) && !target->IsPlayerOwned() &&
    !target->IsMezzed() && !target->HasDied() && c->IsAttackAllowed(target) && DistanceSquared(GetPosition(),target->GetPosition()) < 40000;
  }
  bool IsAttackAllowed(Mob *target, bool spell = false, int16 spell_id = 0) override { return Allowed(target); }
@@ -279,7 +355,8 @@ public:
  void Assist() { stance_ = 1; }
  bool Save(bool active);
  bool LoadSpellState();
- void Restore(int hp, int mana, int stance) { if (hp >= 0) SetHP(std::min<int>(GetMaxHP(),hp)); if(mana>=0) SetMana(std::min<int>(GetMaxMana(),mana)); stance_=stance; }
+ // Negative saved resources mean a fresh spawn or a full-resource revival.
+ void Restore(int hp, int mana, int stance) { SetHP(hp < 0 ? GetMaxHP() : std::min<int>(GetMaxHP(),hp)); SetMana(mana < 0 ? GetMaxMana() : std::min<int>(GetMaxMana(),mana)); stance_=stance; }
  bool AI_EngagedCastCheck() override {
   if(CastClassSpells(true))return true;
   if(CanRangedAttack(GetTarget()) && DistanceSquared(GetPosition(),GetTarget()->GetPosition())>100) {StopNavigation();RangedAttack(GetTarget());return true;}
@@ -527,7 +604,7 @@ bool PlayerBot::HealTarget(Mob *target)
 
 bool PlayerBot::CastClassSpells(bool combat)
 {
- if(IsCasting() || !spell_timer_.Check() || !Owner() || options_["suspend"]) return false;
+ if(Retreating() || IsCasting() || !spell_timer_.Check() || !Owner() || options_["suspend"]) return false;
  Mob *hurt=this;
  if(Owner()->GetHPRatio()<hurt->GetHPRatio()) hurt=Owner();
  for(auto *m:Friends())
@@ -582,11 +659,97 @@ std::vector<PlayerBot*> Owned(Client *c)
 
 #include "player_bot_formation.inc"
 
+// Short, model-aware melee adjustments; never navigate toward the target center.
+
+bool PlayerBot::BackAttackPosition() {
+ auto *target=GetTarget();
+ if(!options_["backattack"] || Retreating() || forced_sit_ || !stance_ || options_["suspend"] || ranged_mode_ ||
+    !Allowed(target) || IsCasting() || IsRooted() || IsStunned() || IsMezzed() || IsFeared() || IsBlind() ||
+    !zone->zonemap || target->GetTarget()==this || DistanceSquaredNoZ(GetPosition(),target->GetPosition())>6400.f) {
+  if(backattack_moving_) StopNavigation();backattack_moving_=false;return false;
+ }
+ std::vector<PlayerBot*> members;
+ float body=BotFormation::BodyRadius(GetSize());
+ for(const auto &entry:entity_list.GetNPCList()) {
+  auto *b=dynamic_cast<PlayerBot*>(entry.second);
+  if(!b || b->GetDepop() || !b->options_["backattack"] || b->GetTarget()!=target || !b->stance_ || b->Retreating() ||
+     b->forced_sit_ || b->options_["suspend"] || b->ranged_mode_ || target->GetTarget()==b)continue;
+  if(b!=this && !(GetGroup() && b->GetGroup()==GetGroup()) && !(GetRaid() && b->GetRaid()==GetRaid()))continue;
+  members.push_back(b);body=std::max(body,BotFormation::BodyRadius(b->GetSize()));
+ }
+ std::sort(members.begin(),members.end(),[](PlayerBot*a,PlayerBot*b){return a->ID()<b->ID();});
+ const auto it=std::find(members.begin(),members.end(),this);
+ if(it==members.end())return false;
+ const unsigned index=it-members.begin(),count=members.size();
+ const float radius=BotBackAttack::Radius(target->GetBoundingRadius(),body,count);
+ const auto slot=BotBackAttack::Slot(target->GetHeading(),index,count,radius);
+ const float dz=GetZ()-target->GetZ();
+ // Never trade melee reach for fitting more bodies into the arc.
+ if(!CombatRange(target,radius*radius+dz*dz)) {if(backattack_moving_)StopNavigation();backattack_moving_=false;return false;}
+ const float dx=GetX()-target->GetX(),dy=GetY()-target->GetY();
+ if(std::hypot(dx-slot.x,dy-slot.y)<(backattack_moving_?.5f:1.2f) && BehindMob(target,GetX(),GetY())) {
+  if(backattack_moving_)StopNavigation();backattack_moving_=false;if(!IsFacingTarget())FaceTarget(target);return false;
+ }
+ const auto now=Timer::GetCurrentTime();
+ if(now<backattack_next_)return backattack_moving_;
+ backattack_next_=now+250;
+ const auto step=BotBackAttack::Step({dx,dy},BotBackAttack::Angle(target->GetHeading(),index,count),radius);
+ glm::vec3 dest(target->GetX()+step.x,target->GetY()+step.y,GetZ());
+ const float floor=zone->zonemap->FindBestZ(dest,nullptr,20.f);
+ bool safe=floor!=BEST_Z_INVALID && std::isfinite(floor);
+ if(safe) {
+  dest.z=floor+GetZOffset();
+  safe=std::abs(dest.z-GetZ())<=6.f && !(zone->HasWaterMap() && zone->watermap->InLiquid(dest)) && !zone->IsWaterZone(dest.z) &&
+       BotFormation::SafeRoute(zone->pathing,zone->zonemap,glm::vec3(GetPosition()),dest);
+ }
+ if(!safe) {if(backattack_moving_)StopNavigation();backattack_moving_=false;return false;}
+ RunTo(dest.x,dest.y,dest.z);backattack_moving_=true;return true;
+}
+
+bool PlayerBot::CloseTankPosition() {
+ auto *target=GetTarget();
+ if(options_["backattack"] || !options_["tankclose"] || Retreating() || forced_sit_ || !stance_ || options_["suspend"] || ranged_mode_ ||
+    !Allowed(target) || IsCasting() || IsRooted() || IsStunned() || IsMezzed() || IsFeared() || IsBlind() ||
+    !zone->zonemap || !CombatRange(target) || !CheckLosFN(target)) {tank_close_moving_=false;return false;}
+ const float clearance=GetBoundingRadius()+target->GetBoundingRadius()+1.0f;
+ // Large models whose clearance exceeds melee reach keep normal positioning.
+ const float dz=GetZ()-target->GetZ();
+ if(!std::isfinite(clearance) || !CombatRange(target,clearance*clearance+dz*dz)) {tank_close_moving_=false;return false;}
+ float dx=GetX()-target->GetX(),dy=GetY()-target->GetY();
+ const float distance=std::sqrt(dx*dx+dy*dy);
+ const float tolerance=tank_close_moving_?0.25f:0.8f;
+ if(std::abs(distance-clearance)<=tolerance) {
+  if(tank_close_moving_) {StopNavigation();FaceTarget(target);}
+  tank_close_moving_=false;return false;
+ }
+ const auto now=Timer::GetCurrentTime();
+ if(now<tank_close_next_) return tank_close_moving_;
+ tank_close_next_=now+300;
+ // If already overlapping, step toward the owner's side rather than divide by zero.
+ if(distance<0.01f) {auto *owner=Owner();dx=owner?owner->GetX()-target->GetX():1.f;dy=owner?owner->GetY()-target->GetY():0.f;}
+ const float length=std::sqrt(dx*dx+dy*dy);
+ if(length<0.01f) {dx=1.f;dy=0.f;} else {dx/=length;dy/=length;}
+ glm::vec3 dest(target->GetX()+dx*clearance,target->GetY()+dy*clearance,GetZ());
+ const float floor=zone->zonemap->FindBestZ(dest,nullptr,20.f);
+ if(floor==BEST_Z_INVALID || !std::isfinite(floor)) {StopNavigation();tank_close_moving_=false;return false;}
+ dest.z=floor+GetZOffset();
+ if(std::abs(dest.z-GetZ())>6.f || (zone->HasWaterMap() && zone->watermap->InLiquid(dest)) || zone->IsWaterZone(dest.z) ||
+    !BotFormation::SafeRoute(zone->pathing,zone->zonemap,glm::vec3(GetPosition()),dest)) {
+  StopNavigation();tank_close_moving_=false;return false;
+ }
+ // LOS plus a direct segment prevents a detour through the enemy's center.
+ if(!zone->zonemap->CheckLoS(glm::vec3(GetPosition()),dest)) {tank_close_moving_=false;return false;}
+ RunTo(dest.x,dest.y,dest.z);tank_close_moving_=true;return true;
+}
+
+
 bool Spawn(Client *c,uint32 id)
 {
  if(!c->Connected() || c->IsDead()) return false;
  for(auto *b:Owned(c)) if(b->ID()==id) return true;
- if(Owned(c).size()>=5)return false;
+ if(Owned(c).size()>=c->ChallengeBotLimit()) {
+  c->Message(Chat::Yellow,"Bot limit reached: %u at your current level. Challenge unlocks: 5, 15, 25, 35, 45.",c->ChallengeBotLimit());return false;
+ }
  auto rowset=database.QueryDatabase(fmt::format("SELECT name,class,race,gender FROM takp_bot_data WHERE id={} AND owner_character_id={}",id,c->CharacterID()));
  if(!rowset.Success() || rowset.RowCount()!=1) return false;
  if(!database.QueryDatabase(fmt::format("INSERT IGNORE INTO takp_bot_runtime(bot_id) VALUES({})",id)).Success()) return false;
@@ -645,14 +808,28 @@ bool PlayerBotSpellTargetAllowed(Mob *m,Mob *target,unsigned short id){
  return b->Allowed(target);
 }
 int PlayerBotDoTDamage(Mob *m,unsigned short id,int value){auto *b=dynamic_cast<PlayerBot*>(m);return b?b->BotDoTDamage(id,value):value;}
+bool HandlePlayerBotBackAttack(Mob *mob) {auto *bot=dynamic_cast<PlayerBot*>(mob);return bot && bot->BackAttackPosition();}
+bool HandlePlayerBotTankClose(Mob *mob) {auto *bot=dynamic_cast<PlayerBot*>(mob);return bot && bot->CloseTankPosition();}
 bool IsPlayerBot(Mob *m) { return dynamic_cast<PlayerBot*>(m)!=nullptr; }
 bool IsPlayerBotPet(Mob *m) { return m && m->GetOwnerID() && IsPlayerBot(m->GetOwner()); }
 bool ConsumePlayerBotReagents(Mob *m,unsigned short id){auto *b=dynamic_cast<PlayerBot*>(m);return b&&b->ConsumeComponents(id);}
 void ApplyPlayerBotDamageMultiplier(Mob *mob,int offense,int &damage,int skill) { if(auto *bot=dynamic_cast<PlayerBot*>(mob))bot->RollDamageMultiplier(offense,damage,static_cast<EQ::skills::SkillType>(skill)); }
 void SavePlayerBots(Client *c) { for(auto *b:Owned(c)) { b->Save(!c->IsDead()); b->DismissPet(); b->LeaveCompanionGroup(); b->Depop(); } }
+void EnforceChallengeBotLimit(Client *c)
+{
+ if(!c)return;
+ auto bots=Owned(c);
+ std::sort(bots.begin(),bots.end(),[](PlayerBot *a,PlayerBot *b){return a->ID()<b->ID();});
+ for(unsigned i=c->ChallengeBotLimit();i<bots.size();++i){
+  auto *b=bots[i];
+  if(!b->Save(false))c->Message(Chat::Red,"Could not save %s before enforcing the bot limit.",b->GetCleanName());
+  b->DismissPet();b->LeaveCompanionGroup();b->Depop();
+ }
+ if(bots.size()>c->ChallengeBotLimit())c->Message(Chat::Yellow,"Excess bots dismissed to match your current bot limit (%u).",c->ChallengeBotLimit());
+}
 void RestorePlayerBots(Client *c)
 {
- auto rows=database.QueryDatabase(fmt::format("SELECT d.id FROM takp_bot_data d JOIN takp_bot_runtime r ON r.bot_id=d.id WHERE d.owner_character_id={} AND r.active=1 ORDER BY d.id LIMIT 5",c->CharacterID()));
+ auto rows=database.QueryDatabase(fmt::format("SELECT d.id FROM takp_bot_data d JOIN takp_bot_runtime r ON r.bot_id=d.id WHERE d.owner_character_id={} AND r.active=1 ORDER BY d.id LIMIT {}",c->CharacterID(),c->ChallengeBotLimit()));
  if(rows.Success()) for(auto r=rows.begin();r!=rows.end();++r) Spawn(c,strtoul(r[0],nullptr,10));
 }
 
@@ -720,13 +897,31 @@ bool FinishPlayerBotTrade(Client *c,Mob *m){auto *b=dynamic_cast<PlayerBot*>(m);
 bool HandlePlayerBotCommand(Client *c,const Seperator *sep)
 {
  auto action=Strings::ToLower(sep->arg[1]);
+
+ if(action=="assist" && Strings::ToLower(sep->arg[2])=="target") {
+  const auto mode=Strings::ToLower(sep->arg[4]);
+  if(sep->argnum!=4 || (mode!="on" && mode!="off")) {c->Message(Chat::White,"Select your bot, then use #bot assist target PlayerOrBotName on|off.");return true;}
+  auto *bot=dynamic_cast<PlayerBot*>(c->GetTarget());
+  if(!bot || !bot->BelongsTo(c) || bot->GetDepop()) {c->Message(Chat::White,"Select one of your spawned bots first.");return true;}
+  Mob *source=nullptr;
+  if(mode=="on") {
+   source=entity_list.GetMob(sep->arg[3]);
+   if(!bot->ValidAssistSource(source)) {c->Message(Chat::White,"The named player or bot must be alive in this zone and in your bot's group or raid, and cannot be the selected bot itself.");return true;}
+   if(bot->AssistCycle(source)) {c->Message(Chat::White,"Cannot create a circular bot assist chain.");return true;}
+  }
+  if(!bot->SetAssistSource(source))c->Message(Chat::White,"Could not save assist target; previous setting retained.");
+  else if(source)c->Message(Chat::White,"%s now assists %s's selected enemy. Saved; overrides normal assist until disabled. Passive, sit, suspend and retreat still take priority.",bot->GetCleanName(),source->GetCleanName());
+  else c->Message(Chat::White,"%s: assist target OFF, saved. Normal owner-based assist restored; existing passive/sit/retreat settings remain in effect.",bot->GetCleanName());
+  return true;
+ }
+
  if(action=="dps") {
   const auto mode=Strings::ToLower(sep->arg[3]);
   if(Strings::ToLower(sep->arg[2])!="cast" || (mode!="on" && mode!="off") || sep->argnum<3 || sep->argnum>4) {
    c->Message(Chat::White,"Usage: #bot dps cast on|off [Name|all]. Applies to your spawned bots; saved per bot.");return true;
   }
   const auto name=Strings::ToLower(sep->arg[4]);
-  unsigned matched=0;
+ unsigned matched=0;
   for(auto *b:Owned(c)) {
    if(!name.empty() && name!="all" && Strings::ToLower(b->GetCleanName())!=name)continue;
    ++matched;
@@ -744,9 +939,13 @@ bool HandlePlayerBotCommand(Client *c,const Seperator *sep)
  if(SavedBotGroup(c,action,sep->arg[2]))return true;
  if(action=="help" || action.empty()) {
   c->Message(Chat::White,"#bot dps cast on|off [Name|all]: toggle direct-damage spells for spawned bots; DoTs, buffs and heals remain allowed. Saved per bot.");
+  c->Message(Chat::White,"#bot retreat Name|all on|off: stop combat/casting and follow; overrides assist and sit. Saved per bot until off.");
   c->Message(Chat::White,"#bot sit Name|all on|off: sit and stay until released; off restores prior follow/stay mode.");
   c->Message(Chat::White,"#bot keeppace on|off|status; #bot formation on|off|status; #bot formation gather on|off; #bot formation line on|off");
   c->Message(Chat::White,"#bot create Name Class Race Gender | list | spawn Name | attack/follow/stay/passive/assist/dismiss Name (or all)");
+  c->Message(Chat::White,"#bot assist target PlayerOrBotName on|off: select your bot first; saved override for group/raid assisting.");
+  c->Message(Chat::White,"#bot backattack Name|all on|off: saved rear combat formation, center then alternating left/right.");
+  c->Message(Chat::White,"#bot tankclose Name|all on|off: saved close melee positioning with model clearance.");
   c->Message(Chat::White,"#bot equip/unequip Name InventorySlot(22-29) BotSlot(0-21) | inventory Name | revive Name. Equipment changes require no combat.");
   c->Message(Chat::White,"#bot pet/cure/resurrect/mez/charm/fear/lull/invisibility/levitate/waterbreathing Name (uses your target)");
   c->Message(Chat::White,"#bot supply/withdraw Name InventorySlot ItemID(for withdraw) | supplies Name | ranged/taunt/petenabled Name 0/1 | songs Name SpellID... (up to 4; empty clears)");
@@ -773,40 +972,71 @@ bool HandlePlayerBotCommand(Client *c,const Seperator *sep)
   auto rows=database.QueryDatabase(fmt::format("SELECT item_id,quantity FROM takp_bot_supplies WHERE bot_id={} AND quantity>0",id));
   if(rows.Success())for(auto r=rows.begin();r!=rows.end();++r)c->Message(Chat::White,"Item %s: %s",r[0],r[1]);return true;
  }
- if(action=="spawn"&&name=="all"){auto roster=database.QueryDatabase(fmt::format("SELECT id FROM takp_bot_data WHERE owner_character_id={} ORDER BY id",c->CharacterID()));if(roster.Success())for(auto r=roster.begin();r!=roster.end()&&Owned(c).size()<5;++r)Spawn(c,strtoul(r[0],nullptr,10));return true;}
+ if(action=="spawn"&&name=="all"){if(Owned(c).size()>=c->ChallengeBotLimit()){c->Message(Chat::Yellow,"Bot limit reached: %u at your current level. Challenge unlocks: 5, 15, 25, 35, 45.",c->ChallengeBotLimit());return true;}auto roster=database.QueryDatabase(fmt::format("SELECT id FROM takp_bot_data WHERE owner_character_id={} ORDER BY id",c->CharacterID()));if(roster.Success())for(auto r=roster.begin();r!=roster.end()&&Owned(c).size()<c->ChallengeBotLimit();++r)Spawn(c,strtoul(r[0],nullptr,10));return true;}
  if(action=="spawn") { if(!id||!Spawn(c,id)) c->Message(Chat::White,"Unable to spawn that bot."); return true; }
  if(action=="revive") {
-  bool live=false; for(auto *b:Owned(c)) if(b->ID()==id) live=true;
-  if(id&&!live&&!c->GetAggroCount()) {
-   auto r=database.QueryDatabase(fmt::format("UPDATE takp_bot_runtime SET hp=1,mana=0,active=0 WHERE bot_id={} AND hp=0 AND saved_at<TIMESTAMPADD(SECOND,-60,CURRENT_TIMESTAMP)",id));
-   c->Message(Chat::White,r.Success()&&r.RowsAffected()?"Bot revived at 1 HP; you may spawn it.":"Revival requires a fallen bot and a 60-second wait.");
-  } else c->Message(Chat::White,"Cannot revive that bot now.");
+  if(!id) {c->Message(Chat::White,"You do not own that bot.");return true;}
+  for(auto *b:Owned(c)) if(b->ID()==id) {c->Message(Chat::White,"That bot is already spawned.");return true;}
+  if(c->IsDead()) {c->Message(Chat::White,"You must be alive to revive a bot.");return true;}
+  bool combat=c->GetAggroCount()!=0;
+  for(auto *b:Owned(c)) if(b->IsEngaged() || (b->GetPet() && b->GetPet()->IsEngaged())) combat=true;
+  if(c->GetPet() && c->GetPet()->IsEngaged()) combat=true;
+  if(combat) {c->Message(Chat::White,"Cannot revive while you, your bots, or your pets are in combat. Clear enemy aggro and try again; there is no revival timer.");return true;}
+  // Atomic fallen -> ready transition. Never use saved_at as a death timer:
+  // failed spawn attempts and other runtime updates also change that timestamp.
+  auto r=database.QueryDatabase(fmt::format("UPDATE takp_bot_runtime SET hp=-1,mana=-1,active=0,generation=generation+1 WHERE bot_id={} AND hp=0",id));
+  if(!r.Success()) c->Message(Chat::White,"Could not save revival. Please try again.");
+  else if(!r.RowsAffected()) c->Message(Chat::White,"That bot is not fallen. Use #bot spawn %s to summon it.",name.c_str());
+  else c->Message(Chat::White,"%s revived. Use #bot spawn %s to summon it with full health and mana.",name.c_str(),name.c_str());
   return true;
  }
  if(action=="inventory") {
   if(!id) {c->Message(Chat::White,"You do not own that bot.");return true;}
   auto rows=database.QueryDatabase(fmt::format("SELECT slot,item_id,charges FROM takp_bot_inventory WHERE bot_id={} ORDER BY slot",id));
-  if(rows.Success()) for(auto r=rows.begin();r!=rows.end();++r) c->Message(Chat::White,"Slot %s: item %s (%s charges)",r[0],r[1],r[2]);
+  if(!rows.Success()) {c->Message(Chat::White,"Unable to read this bot's equipment. Please try again.");return true;}
+  if(!rows.RowCount()) c->Message(Chat::White,"This bot has no equipped items.");
+  for(auto r=rows.begin();r!=rows.end();++r) {
+   const auto* item=database.GetItem(strtoul(r[1],nullptr,10));
+   c->Message(Chat::White,"Slot %s: %s (ID %s, %s charges)",r[0],item?item->Name:"Unknown item",r[1],r[2]);
+  }
   return true;
  }
+ if(action=="backattack" && (sep->argnum!=3 || (Strings::ToLower(sep->arg[3])!="on" && Strings::ToLower(sep->arg[3])!="off"))) {c->Message(Chat::White,"Use #bot backattack Name|all on|off.");return true;}
+ if(action=="tankclose" && (sep->argnum!=3 || (Strings::ToLower(sep->arg[3])!="on" && Strings::ToLower(sep->arg[3])!="off"))) {c->Message(Chat::White,"Use #bot tankclose Name on|off or #bot tankclose all on|off.");return true;}
  unsigned matched=0;
+ if(action=="retreat" && (sep->argnum!=3 || (Strings::ToLower(sep->arg[3])!="on" && Strings::ToLower(sep->arg[3])!="off"))) {c->Message(Chat::White,"Use #bot retreat Name on|off or #bot retreat all on|off.");return true;}
  if(action=="sit" && (sep->argnum!=3 || (Strings::ToLower(sep->arg[3])!="on" && Strings::ToLower(sep->arg[3])!="off"))) {c->Message(Chat::White,"Use #bot sit Name on|off or #bot sit all on|off.");return true;}
  for(auto *b:Owned(c)) {
   if(name!="all" && b->ID()!=id) continue;
   ++matched;
-  if(action=="sit") {b->ForceSit(Strings::ToLower(sep->arg[3])=="on");c->Message(Chat::White,"%s: forced sit %s. Meditate skill %u; current mana regeneration %d per tick.",b->GetCleanName(),b->forced_sit_?"ON":"OFF",b->GetSkill(EQ::skills::SkillMeditate),b->PlayerManaRegen());}
+  if(action=="retreat") {
+   const bool enabled=Strings::ToLower(sep->arg[3])=="on";
+   if(!b->SetBehavior("retreat",enabled)) c->Message(Chat::White,"Could not save retreat for %s; its setting was not changed.",b->GetCleanName());
+   else c->Message(Chat::White,"%s: retreat %s, saved. %s",b->GetCleanName(),enabled?"ON":"OFF",enabled?"Following without attacks or spells; enemies still retain their hate.":"Normal behavior restored.");
+  }
+  else if(b->Retreating() && (action=="attack"||action=="assist"||action=="stay"||action=="passive"||action=="sit"||action=="summon"||action=="discipline"||action=="aa"||action=="suspend"||action=="release")) c->Message(Chat::White,"%s is retreating. Use #bot retreat %s off first.",b->GetCleanName(),b->GetCleanName());
+  else if(action=="backattack" && (sep->argnum!=3 || (Strings::ToLower(sep->arg[3])!="on" && Strings::ToLower(sep->arg[3])!="off"))) {c->Message(Chat::White,"Use #bot backattack Name|all on|off.");return true;}
+ if(action=="tankclose") {
+   const bool enabled=Strings::ToLower(sep->arg[3])=="on";
+   if(!b->SetBehavior("tankclose",enabled)) c->Message(Chat::White,"Could not save tankclose for %s.",b->GetCleanName());
+   else c->Message(Chat::White,"%s: close tank positioning %s, saved. Ranged mode must be off for close positioning.",b->GetCleanName(),enabled?"ON":"OFF");
+  }
+  else if(action=="sit") {b->ForceSit(Strings::ToLower(sep->arg[3])=="on");c->Message(Chat::White,"%s: forced sit %s. Meditate skill %u; current mana regeneration %d per tick.",b->GetCleanName(),b->forced_sit_?"ON":"OFF",b->GetSkill(EQ::skills::SkillMeditate),b->PlayerManaRegen());}
   else if(b->forced_sit_ && (action=="attack"||action=="follow"||action=="stay"||action=="passive"||action=="assist"||action=="summon"||action=="discipline"||action=="aa")) c->Message(Chat::White,"%s is held sitting. Use #bot sit %s off first.",b->GetCleanName(),b->GetCleanName());
   else if(action=="attack") {if(b->Allowed(c->GetTarget())) b->Engage(c->GetTarget()); else c->Message(Chat::White,"Select an attackable NPC within 200 units.");}
   else if(action=="follow") b->Follow();
   else if(action=="stay") b->Stay();
   else if(action=="passive") b->Passive();
-  else if(action=="assist") b->Assist();
+  else if(action=="assist") {b->Assist();if(b->AssistSourceID())c->Message(Chat::White,"%s retains its saved assist target. Select it and use #bot assist target Name off to restore owner-based assisting.",b->GetCleanName());}
   else if(action=="dismiss") {if(b->IsEngaged()||c->GetAggroCount()) {c->Message(Chat::White,"Cannot dismiss during combat.");continue;} if(b->Save(false)){b->DismissPet();b->LeaveCompanionGroup();b->Depop();}}
   else if(action=="pet"||action=="cure"||action=="resurrect"||action=="mez"||action=="charm"||action=="fear"||action=="lull"||action=="invisibility"||action=="invisundead"||action=="levitate"||action=="waterbreathing") {
    if(!b->Utility(action,c->GetTarget()?c->GetTarget():c))c->Message(Chat::White,"%s could not cast: check class, level, target, mana, reagents, range and cooldown.",b->GetCleanName());
   }
   else if(action=="report") {
+   c->Message(Chat::White,"Backattack: %s.",b->BackAttackEnabled()?"ON":"OFF");
+   if(b->AssistSourceID()){auto *source=b->AssistSource();c->Message(Chat::White,"Assist target: %s (saved %s ID %d).",source?source->GetCleanName():"unavailable; waiting",b->AssistSourceID()>0?"player":"bot",std::abs(b->AssistSourceID()));}else c->Message(Chat::White,"Assist target: OFF (normal owner-based assist).");
    c->Message(Chat::White,"%s level %u: HP %d/%d, mana %d/%d; pet: %s",b->GetCleanName(),b->GetLevel(),b->GetHP(),b->GetMaxHP(),b->GetMana(),b->GetMaxMana(),b->GetPet()?b->GetPet()->GetCleanName():"none");
+   c->Message(Chat::White,"Retreat: %s (saved until switched off).",b->Retreating()?"ON":"OFF");
    c->Message(Chat::White,"Direct-damage casting: %s (DoTs, buffs and heals remain allowed).",b->DirectDamageEnabled()?"ON":"OFF");
    c->Message(Chat::White,"Taunt %s; skill %u; attempts since spawn %u (attempts can fail).",b->IsTaunting()?"ON":"OFF",b->GetSkill(EQ::skills::SkillTaunt),b->bot_taunt_attempts_);
   }
@@ -848,6 +1078,26 @@ bool PlayerBotProjects(Mob *mob,unsigned short spell,Mob *target,bool consume){a
 bool PlayerBotInstantDisc(Mob *mob,unsigned short skill,bool consume){auto *b=dynamic_cast<PlayerBot*>(mob);if(!b||!b->InstantDisc(skill))return false;if(consume)b->FadeDiscipline();return true;}
 
 int PlayerBotRegen(Mob *mob,bool mana){auto *b=dynamic_cast<PlayerBot*>(mob);return b?(mana?b->PlayerManaRegen():b->PlayerHPRegen()):0;}
+
+bool PlayerBotRetreating(Mob* mob) {
+ if(!mob) return false;
+ auto* bot=dynamic_cast<PlayerBot*>(mob);
+ if(!bot && mob->IsPet()) bot=dynamic_cast<PlayerBot*>(mob->GetOwner());
+ return bot && bot->Retreating();
+}
+
+void FollowPlayerBotRetreat(Mob* mob) {
+ if(auto* bot=dynamic_cast<PlayerBot*>(mob)) {
+  if(auto* owner=bot->Owner()) {bot->Follow();HandlePlayerBotFormation(bot,owner);}
+  else bot->StopNavigation();
+ } else if(auto* owner=mob->GetOwner()) {
+  // The pet follows its retreating bot, without changing its saved pet order.
+  if(DistanceSquaredNoZ(mob->GetPosition(),owner->GetPosition())>100.f) {
+   auto destination=owner->GetPosition();destination.z=mob->GetFixedZ(destination);
+   mob->RunTo(destination.x,destination.y,destination.z);
+  } else if(mob->IsMoving()) mob->StopNavigation();
+ }
+}
 
 bool HandlePlayerBotFormation(Mob* mob, Mob* follow) {
  auto* bot = dynamic_cast<PlayerBot*>(mob);

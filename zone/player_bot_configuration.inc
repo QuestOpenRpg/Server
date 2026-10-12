@@ -12,6 +12,7 @@ bool PlayerBot::LoadConfiguration()
   auto x=spell_settings_.find(a.spellid),y=spell_settings_.find(b.spellid);return (x==spell_settings_.end()?0:x->second.priority)<(y==spell_settings_.end()?0:y->second.priority);
  });
  if(options_["suspend"]){Passive();Stay();}
+ if(Retreating()) BeginRetreat();
  return true;
 }
 
@@ -24,11 +25,17 @@ bool PlayerBot::SetSpellSetting(uint16 id,int enabled,int min_hp,int max_hp,int 
 
 bool PlayerBot::SetBehavior(const std::string &key,int value)
 {
- const std::set<std::string> booleans={"suspend","enforcespellsettings","announcecasts","dpscast"};
+ const std::set<std::string> booleans={"suspend","enforcespellsettings","announcecasts","dpscast","retreat","tankclose","backattack"};
  const std::set<std::string> percentages={"healpercent"};
  if((booleans.count(key)&&(value<0||value>1))||(percentages.count(key)&&(value<0||value>100))||(!booleans.count(key)&&!percentages.count(key)))return false;
  if(!database.QueryDatabase(fmt::format("INSERT INTO takp_bot_options VALUES({},'{}',{}) ON DUPLICATE KEY UPDATE value=VALUES(value)",bot_id_,key,value)).Success())return false;
  options_[key]=value;
+ if(key=="backattack") {if(backattack_moving_ || tank_close_moving_)StopNavigation();backattack_moving_=false;tank_close_moving_=false;backattack_next_=0;}
+ if(key=="tankclose") {if(tank_close_moving_) StopNavigation();tank_close_moving_=false;tank_close_next_=0;}
+ if(key=="retreat") {
+  if(value) BeginRetreat();
+  else {WipeHateList();SetTarget(nullptr);ResetFormationMotion();if(options_["suspend"]) Stay();else Follow();}
+ }
  if(key=="dpscast" && !value && IsCasting() && !DirectDamageAllowed(casting_spell_id)) InterruptSpell();
  if(key=="suspend"){if(value){Passive();Stay();}else{Assist();Follow();}}
  return true;
@@ -44,7 +51,7 @@ bool PlayerBot::BlockBuff(uint16 id,bool blocked)
 
 bool PlayerBot::SpellPermitted(uint16 id,Mob *target)
 {
- if(!DirectDamageAllowed(id)||options_["suspend"]||utility_recasts_[id]>Timer::GetCurrentTime())return false;
+ if(Retreating()||!DirectDamageAllowed(id)||options_["suspend"]||utility_recasts_[id]>Timer::GetCurrentTime())return false;
  auto setting=spell_settings_.find(id);
  if(setting==spell_settings_.end()) {if(options_["enforcespellsettings"])return false;}
  else if(!setting->second.enabled || (target&&(target->GetHPRatio()<setting->second.min_hp||target->GetHPRatio()>setting->second.max_hp)))return false;

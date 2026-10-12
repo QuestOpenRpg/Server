@@ -1,0 +1,39 @@
+CHALLENGE MODE
+Installed October 8, 2026
+
+PLAYER COMMANDS
+#challenge mode on
+#challenge mode status
+
+Normal activation requires level 1, being outside Plane of Knowledge,
+and having no saved bind point in Plane of Knowledge. The setting belongs
+to this character and persists through zoning, logout and server restarts.
+The normal command cannot disable Challenge Mode.
+
+RULES
+PoK books cannot be used before level 45. Clicking one explains the limit.
+This blocks books, not every possible travel route into PoK.
+
+Bots can be created at any level. Concurrent summoned bot limits:
+Levels 1-4:   0
+Levels 5-14:  1
+Levels 15-24: 2
+Levels 25-34: 3
+Levels 35-44: 4
+Level 45+:   5 in a normal group; additional bots in an existing raid.
+
+At 45, the challenge level cap is removed. Normal group/raid capacity still
+applies: six per group, 72 total raid members including players. The raid
+leader can fill additional raid groups. Losing levels can dismiss excess
+bots. Changing mode also enforces the resulting capacity.
+
+Death XP loss and equipment/cash-bearing corpses apply starting at level 1.
+Recover carried equipment, items and money from your corpse. Bank contents
+remain in the bank. Normal soulbound and death-exception rules still apply.
+
+No existing character was enrolled automatically.
+
+TESTING
+Build and automated command, persistence, XP, bot-limit and raid tests passed.
+Actual gameplay still needs verification: level-1 activation, blocked book
+message, death and gear/cash recovery, logout persistence, and raid spawning.
