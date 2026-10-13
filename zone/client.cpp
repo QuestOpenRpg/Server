@@ -32,7 +32,6 @@
 #endif
 
 #include "../common/eqemu_logsys.h"
-#include "tunnel_market.h"
 #include "../common/features.h"
 #include "../common/spdat.h"
 #include "../common/guilds.h"
@@ -3070,8 +3069,6 @@ void Client::Escape()
 // Based on http://www.eqtraders.com/articles/article_page.php?article=g190&menustr=070000000000
 float Client::CalcPriceMod(Mob* other, bool reverse)
 {
-	if (other && other->IsNPC() && TunnelMarket::IsMerchant(other->GetNPCTypeID(), other->CastToNPC()->MerchantType))
-		return 1.0f;
 	float priceMult = 0.8f;
 
 	if (other && other->IsNPC())
