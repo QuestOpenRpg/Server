@@ -36,6 +36,10 @@ in `/tmp/takp-follow-trace.log` and `/tmp/takp-bot-packets.log`.
 3. Apply `utils/sql/player_bots/001_bot_records.sql` through `011_bot_keep_pace.sql`
    in numeric order to the destination gameplay database. Use the MariaDB client
    (scripts include delimiter directives and triggers). Stop on any SQL error.
+   Also apply [the Challenge Mode migration](../challenge-mode/migration.sql) for
+   both new installations and upgrades, even if Challenge Mode will not be used.
+   Character login requires its `takp_character_challenge` table; a missing table
+   causes the zone server to reject login.
 4. Verify all eleven versions are recorded in `takp_bot_schema`. The scripts add bot
    tables and shared character/bot name reservations; they do not import player data.
    Existing name collisions must be resolved before installation can finish.
@@ -90,3 +94,12 @@ Before starting this version, apply the additive SQL in
 will enable the mode. Character login now loads this table. Retain all existing
 character and bot tables. Rebuild the zone target; the positioning, retreat and
 assist settings use the existing bot options table.
+
+## Formation in legacy-navigation zones
+
+Formation supports zones using legacy `.path` navigation as well as `.nav`
+meshes. Legacy navigation uses short collision-map checks for continuous floor,
+wall clearance, and drops; it does not require replacing the zone's path files.
+Rebuild and install the zone executable to receive this fix; no additional SQL
+is required. Missing collision maps and positions without enough safe space
+still fall back to ordinary following, which can bunch bots together.

@@ -26,7 +26,7 @@ OwnerFormation& FormationFor(Client* owner) {
 bool FormationDestination(PlayerBot* bot, Client* owner, BotFormation::Point offset, glm::vec3& result) {
     const auto now=Timer::GetCurrentTime();
     result = glm::vec3(bot->follow_motion_.X(now) + offset.x, bot->follow_motion_.Y(now) + offset.y, owner->GetZ());
-    if (!zone->zonemap || !zone->pathing || !zone->pathing->IsUsingNavMesh()) return false;
+    if (!zone->zonemap || !zone->pathing) return false;
     glm::vec3 ground = result;
     float z = zone->zonemap->FindBestZ(ground, nullptr, 20.f);
     if (z == BEST_Z_INVALID || !std::isfinite(z)) return false;
